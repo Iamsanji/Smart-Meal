@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import RecipeCard from "./components/RecipeCard";
 import MealPlan from "./components/MealPlan";
 import RecipeModal from "./components/RecipeModal";
+import ShoppingList from "./components/ShoppingList";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
@@ -23,7 +24,12 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [searchMode, setSearchMode] = useState('name');
+  const [searchHistory, setSearchHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('searchHistory') || '[]'); } catch { return []; }
+  });
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -50,6 +56,8 @@ function App() {
 
   async function doSearch(q, cat, area) {
     setLoading(true);
+    setShowSuggestions(false);
+    if (q.trim()) addToHistory(q.trim());
     try {
       const result = await invoke("search_recipes", {
         query: q,
@@ -65,6 +73,8 @@ function App() {
 
   async function doIngredientSearch(q) {
     setLoading(true);
+    setShowSuggestions(false);
+    if (q.trim()) addToHistory(q.trim());
     try {
       const result = await invoke("search_by_ingredient", { ingredient: q });
       setRecipes(JSON.parse(result));
@@ -181,6 +191,24 @@ function App() {
     saveMealPlan({});
   }
 
+  function addToHistory(term) {
+    const filtered = searchHistory.filter(h => h.toLowerCase() !== term.toLowerCase());
+    const updated = [term, ...filtered].slice(0, 20);
+    setSearchHistory(updated);
+    localStorage.setItem('searchHistory', JSON.stringify(updated));
+  }
+
+  function removeFromHistory(term) {
+    const updated = searchHistory.filter(h => h !== term);
+    setSearchHistory(updated);
+    localStorage.setItem('searchHistory', JSON.stringify(updated));
+  }
+
+  function clearHistory() {
+    setSearchHistory([]);
+    localStorage.removeItem('searchHistory');
+  }
+
   async function saveTemplate(name) {
     const newTemplate = { id: Date.now().toString(), name, plan: { ...mealPlan } };
     const updated = [...templates, newTemplate];
@@ -232,6 +260,7 @@ function App() {
           {[
             { id: "search", label: "Search" },
             { id: "planner", label: "Plan" },
+            { id: "shopping", label: "Shop" },
             { id: "favorites", label: "Favorites" },
           ].map((tab) => (
             <button
@@ -254,13 +283,49 @@ function App() {
         {activeTab === "search" && (
           <section className="animate-fadeIn">
             {/* Search input */}
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={searchMode === 'ingredient' ? "Search by ingredient..." : "Search recipes..."}
-              className="w-full px-4 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:bg-white dark:focus:bg-neutral-900 focus:ring-1 focus:ring-neutral-300 dark:focus:ring-neutral-600 transition-all dark:text-neutral-100"
-            />
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                placeholder={searchMode === 'ingredient' ? "Search by ingredient..." : "Search recipes..."}
+                className="w-full px-4 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:bg-white dark:focus:bg-neutral-900 focus:ring-1 focus:ring-neutral-300 dark:focus:ring-neutral-600 transition-all dark:text-neutral-100"
+              />
+
+              {/* Search suggestions dropdown */}
+              {showSuggestions && !query && searchHistory.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg z-20 overflow-hidden animate-scaleIn">
+                  <div className="px-3 py-2 border-b border-neutral-100 dark:border-neutral-700 flex items-center justify-between">
+                    <p className="text-[10px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">Recent</p>
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); clearHistory(); }}
+                      className="text-[10px] text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {searchHistory.slice(0, 8).map((term) => (
+                    <div key={term} className="flex items-center group">
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); setQuery(term); setShowSuggestions(false); }}
+                        className="flex-1 px-3 py-2 text-left text-xs text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer truncate"
+                      >
+                        {term}
+                      </button>
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); removeFromHistory(term); }}
+                        className="px-2 text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 opacity-0 group-hover:opacity-100 text-[10px] cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Search mode + Filters */}
             <div className="flex gap-2 mt-3 overflow-x-auto pb-1 items-center">
@@ -365,6 +430,11 @@ function App() {
             onApplyTemplate={applyTemplate}
             onDeleteTemplate={deleteTemplate}
           />
+        )}
+
+        {/* Shopping Tab */}
+        {activeTab === "shopping" && (
+          <ShoppingList mealPlan={mealPlan} />
         )}
 
         {/* Favorites Tab */}
