@@ -24,8 +24,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
-        run: sdkmanager "ndk;27.0.12077973"
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "ndk;27.0.12077973"
+          sdkmanager "build-tools;35.0.0"
+          sdkmanager "platforms;android-35"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,19 +57,13 @@ jobs:
 
       - name: Build Android APK (debug)
         env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
-        run: npx tauri android build --apk --debug
-
-      - name: Find APK
-        id: find-apk
-        run: |
-          APK_PATH=$(find src-tauri/gen/android -name "*.apk" -type f | head -1)
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "Found APK at: $APK_PATH"
+          NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973
+        run: npx tauri android build --debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SmartMeal-debug-apk
-          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
