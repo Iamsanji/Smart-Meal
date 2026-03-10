@@ -18,6 +18,7 @@ function App() {
   const [selectedArea, setSelectedArea] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [mealPlan, setMealPlan] = useState({});
+  const [templates, setTemplates] = useState([]);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
@@ -85,6 +86,12 @@ function App() {
       setMealPlan(JSON.parse(plan));
     } catch {
       setMealPlan({});
+    }
+    try {
+      const tpl = await invoke("load_templates");
+      setTemplates(JSON.parse(tpl));
+    } catch {
+      setTemplates([]);
     }
   }
 
@@ -172,6 +179,31 @@ function App() {
 
   function clearMealPlan() {
     saveMealPlan({});
+  }
+
+  async function saveTemplate(name) {
+    const newTemplate = { id: Date.now().toString(), name, plan: { ...mealPlan } };
+    const updated = [...templates, newTemplate];
+    setTemplates(updated);
+    try {
+      await invoke("save_templates", { data: JSON.stringify(updated) });
+    } catch (e) {
+      console.error("Failed to save templates:", e);
+    }
+  }
+
+  function applyTemplate(template) {
+    saveMealPlan({ ...template.plan });
+  }
+
+  async function deleteTemplate(id) {
+    const updated = templates.filter(t => t.id !== id);
+    setTemplates(updated);
+    try {
+      await invoke("save_templates", { data: JSON.stringify(updated) });
+    } catch (e) {
+      console.error("Failed to save templates:", e);
+    }
   }
 
   return (
@@ -328,6 +360,10 @@ function App() {
             mealPlan={mealPlan}
             onRemove={removeFromMealPlan}
             onClear={clearMealPlan}
+            templates={templates}
+            onSaveTemplate={saveTemplate}
+            onApplyTemplate={applyTemplate}
+            onDeleteTemplate={deleteTemplate}
           />
         )}
 

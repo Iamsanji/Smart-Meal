@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 function RecipeModal({ recipe, isFav, onToggleFav, onClose, onAddToPlan, days, mealTypes }) {
   const [showPlanMenu, setShowPlanMenu] = useState(false);
   const [activeTab, setActiveTab] = useState('ingredients');
+  const [nutrition, setNutrition] = useState(null);
+  const [nutritionLoading, setNutritionLoading] = useState(false);
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -22,6 +24,16 @@ function RecipeModal({ recipe, isFav, onToggleFav, onClose, onAddToPlan, days, m
       ingredients.push({ name: ingredient.trim(), measure: measure ? measure.trim() : '' });
     }
   }
+
+  useEffect(() => {
+    if (activeTab === 'nutrition' && !nutrition && ingredients.length > 0) {
+      setNutritionLoading(true);
+      invoke('fetch_nutrition', { ingredients: ingredients.map(i => i.name) })
+        .then(res => setNutrition(JSON.parse(res)))
+        .catch(() => setNutrition(null))
+        .finally(() => setNutritionLoading(false));
+    }
+  }, [activeTab]);
 
   const instructions = recipe.strInstructions
     ? recipe.strInstructions
@@ -70,7 +82,7 @@ function RecipeModal({ recipe, isFav, onToggleFav, onClose, onAddToPlan, days, m
 
         {/* Tabs */}
         <div className="flex border-b border-neutral-100 dark:border-neutral-800 px-4 flex-shrink-0">
-          {['ingredients', 'instructions'].map((tab) => (
+          {['ingredients', 'instructions', 'nutrition'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -125,6 +137,42 @@ function RecipeModal({ recipe, isFav, onToggleFav, onClose, onAddToPlan, days, m
                   <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">{step}</p>
                 </div>
               ))}
+            </div>
+          )}
+
+          {activeTab === 'nutrition' && (
+            <div className="animate-fadeIn">
+              {nutritionLoading ? (
+                <div className="text-center py-8 text-neutral-400 dark:text-neutral-500 text-xs loading-spinner">Estimating</div>
+              ) : nutrition ? (
+                <div>
+                  <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mb-4 uppercase tracking-widest font-medium">Estimated · {nutrition.servings} servings</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-neutral-50 dark:bg-neutral-800 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{nutrition.perServing}</p>
+                      <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-1 uppercase tracking-wider">cal / serving</p>
+                    </div>
+                    <div className="bg-neutral-50 dark:bg-neutral-800 rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{nutrition.calories}</p>
+                      <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-1 uppercase tracking-wider">total cal</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    {[{label: 'Protein', value: nutrition.protein, color: 'bg-emerald-500'},
+                      {label: 'Carbs', value: nutrition.carbs, color: 'bg-amber-500'},
+                      {label: 'Fat', value: nutrition.fat, color: 'bg-rose-500'}].map(m => (
+                      <div key={m.label} className="bg-neutral-50 dark:bg-neutral-800 rounded-xl p-3 text-center">
+                        <div className={`w-2 h-2 rounded-full ${m.color} mx-auto mb-2`} />
+                        <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{m.value}</p>
+                        <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">{m.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-neutral-300 dark:text-neutral-600 mt-4 text-center">Values are rough estimates based on typical ingredients</p>
+                </div>
+              ) : (
+                <p className="text-center text-neutral-400 dark:text-neutral-500 text-xs py-8">Nutrition data unavailable</p>
+              )}
             </div>
           )}
         </div>
