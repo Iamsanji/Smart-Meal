@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "SmartMeal - Meal Planner",
-        "width": 1100,
-        "height": 750,
+        "title": "SmartMeal",
+        "width": 390,
+        "height": 844,
         "resizable": true,
         "fullscreen": false
       }

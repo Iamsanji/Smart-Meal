@@ -29,7 +29,7 @@ function RecipeCard({ recipe, isFav, onToggleFav, onOpen, onAddToPlan, days, mea
       </div>
 
       {/* Actions — top right on hover */}
-      <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-2 right-2 flex gap-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => { e.stopPropagation(); onToggleFav(); }}
           className={`w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all ${
@@ -50,7 +50,7 @@ function RecipeCard({ recipe, isFav, onToggleFav, onOpen, onAddToPlan, days, mea
 
       {/* Fav dot (always visible if fav) */}
       {isFav && (
-        <div className="absolute top-2 right-2 group-hover:opacity-0 transition-opacity">
+        <div className="absolute top-2 right-2 hidden sm:block sm:group-hover:hidden transition-opacity">
           <div className="w-2 h-2 bg-neutral-900 dark:bg-neutral-100 rounded-full" />
         </div>
       )}

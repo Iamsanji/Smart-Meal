@@ -204,7 +204,7 @@ function MealPlan({ days, mealTypes, mealPlan, onRemove, onClear, onReorder, tem
                             </div>
                             <button
                               onClick={() => onRemove(day, type)}
-                              className="text-neutral-300 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors opacity-0 group-hover:opacity-100 text-xs"
+                              className="text-neutral-300 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors text-xs"
                             >
                               ✕
                             </button>

@@ -7,6 +7,15 @@
     font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Hide scrollbar for mobile feel */
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 }
 

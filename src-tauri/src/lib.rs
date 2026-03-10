@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -27,7 +28,6 @@ async fn search_recipes(query: String, category: String, area: String) -> Result
             .map_err(|e| e.to_string())?;
 
         let meals = body["meals"].as_array().cloned().unwrap_or_default();
-        // Filter by area client-side if needed, or by name
         let filtered = filter_meals(meals, &query, &area).await;
         return Ok(serde_json::to_string(&filtered).map_err(|e| e.to_string())?);
     }
@@ -46,8 +46,10 @@ async fn search_recipes(query: String, category: String, area: String) -> Result
         return Ok(serde_json::to_string(&filtered).map_err(|e| e.to_string())?);
     }
 
-    // Default: search by name
-    let search_term = if query.is_empty() { "a".to_string() } else { query };
+    // No filters — search by name, and also try matching categories/areas
+    let search_term = if query.is_empty() { "a".to_string() } else { query.clone() };
+
+    // 1) Name search
     let url = format!("{}/search.php?s={}", BASE_URL, search_term);
     let body: Value = reqwest::get(&url)
         .await
@@ -55,9 +57,65 @@ async fn search_recipes(query: String, category: String, area: String) -> Result
         .json()
         .await
         .map_err(|e| e.to_string())?;
+    let mut all_meals = body["meals"].as_array().cloned().unwrap_or_default();
 
-    let meals = body["meals"].as_array().cloned().unwrap_or_default();
-    Ok(serde_json::to_string(&meals).map_err(|e| e.to_string())?)
+    if !query.is_empty() {
+        let q_lower = query.to_lowercase();
+
+        // 2) Check if query matches a category name — fetch all recipes in that category
+        if let Ok(cats_json) = fetch_categories().await {
+            if let Ok(cats) = serde_json::from_str::<Vec<String>>(&cats_json) {
+                for cat in &cats {
+                    if cat.to_lowercase().contains(&q_lower) || q_lower.contains(&cat.to_lowercase()) {
+                        let cat_url = format!("{}/filter.php?c={}", BASE_URL, cat);
+                        if let Ok(resp) = reqwest::get(&cat_url).await {
+                            if let Ok(cat_body) = resp.json::<Value>().await {
+                                if let Some(cat_meals) = cat_body["meals"].as_array() {
+                                    for m in cat_meals {
+                                        all_meals.push(m.clone());
+                                    }
+                                }
+                            }
+                        }
+                        break; // Only match the first category
+                    }
+                }
+            }
+        }
+
+        // 3) Check if query matches an area/cuisine name — fetch all recipes for that area
+        if let Ok(areas_json) = fetch_areas().await {
+            if let Ok(areas) = serde_json::from_str::<Vec<String>>(&areas_json) {
+                for ar in &areas {
+                    if ar.to_lowercase().contains(&q_lower) || q_lower.contains(&ar.to_lowercase()) {
+                        let area_url = format!("{}/filter.php?a={}", BASE_URL, ar);
+                        if let Ok(resp) = reqwest::get(&area_url).await {
+                            if let Ok(area_body) = resp.json::<Value>().await {
+                                if let Some(area_meals) = area_body["meals"].as_array() {
+                                    for m in area_meals {
+                                        all_meals.push(m.clone());
+                                    }
+                                }
+                            }
+                        }
+                        break; // Only match the first area
+                    }
+                }
+            }
+        }
+    }
+
+    // Deduplicate by idMeal
+    let mut seen = std::collections::HashSet::new();
+    let unique: Vec<Value> = all_meals
+        .into_iter()
+        .filter(|m| {
+            let id = m["idMeal"].as_str().unwrap_or("").to_string();
+            seen.insert(id)
+        })
+        .collect();
+
+    Ok(serde_json::to_string(&unique).map_err(|e| e.to_string())?)
 }
 
 async fn filter_meals(meals: Vec<Value>, query: &str, area: &str) -> Vec<Value> {
@@ -304,6 +362,263 @@ fn estimate_macros(ingredient: &str) -> (f64, f64, f64, f64) {
     }
 }
 
+fn estimate_ingredient_cost(ingredient: &str, measure: &str) -> f64 {
+    let lower_ing = ingredient.to_lowercase();
+    let lower_meas = measure.to_lowercase();
+
+    // Parse quantity multiplier from measure (e.g. "2 cups", "500g", "1/2 tsp")
+    let qty = parse_quantity(&lower_meas);
+    // Determine portion scale: small amounts (tsp, pinch, dash) cost less
+    let scale = measure_scale(&lower_meas);
+
+    let base_cost = if lower_ing.contains("chicken") || lower_ing.contains("turkey") {
+        3.50
+    } else if lower_ing.contains("beef") || lower_ing.contains("steak") || lower_ing.contains("mince") {
+        5.00
+    } else if lower_ing.contains("pork") || lower_ing.contains("bacon") || lower_ing.contains("sausage") {
+        4.00
+    } else if lower_ing.contains("salmon") || lower_ing.contains("tuna") || lower_ing.contains("fish") || lower_ing.contains("cod") || lower_ing.contains("prawn") || lower_ing.contains("shrimp") || lower_ing.contains("crab") || lower_ing.contains("lobster") {
+        5.00
+    } else if lower_ing.contains("lamb") {
+        6.00
+    } else if lower_ing.contains("egg") {
+        0.30
+    } else if lower_ing.contains("rice") {
+        0.60
+    } else if lower_ing.contains("pasta") || lower_ing.contains("noodle") || lower_ing.contains("spaghetti") || lower_ing.contains("penne") || lower_ing.contains("macaroni") {
+        0.80
+    } else if lower_ing.contains("bread") || lower_ing.contains("flour") || lower_ing.contains("tortilla") {
+        0.80
+    } else if lower_ing.contains("potato") {
+        0.50
+    } else if lower_ing.contains("cheese") || lower_ing.contains("parmesan") || lower_ing.contains("cheddar") || lower_ing.contains("mozzarella") {
+        1.50
+    } else if lower_ing.contains("milk") || lower_ing.contains("cream") || lower_ing.contains("yoghurt") || lower_ing.contains("yogurt") {
+        1.00
+    } else if lower_ing.contains("butter") {
+        0.60
+    } else if lower_ing.contains("oil") || lower_ing.contains("olive") {
+        0.40
+    } else if lower_ing.contains("sugar") || lower_ing.contains("honey") || lower_ing.contains("syrup") {
+        0.30
+    } else if lower_ing.contains("onion") || lower_ing.contains("garlic") || lower_ing.contains("celery") || lower_ing.contains("leek") {
+        0.30
+    } else if lower_ing.contains("tomato") || lower_ing.contains("pepper") || lower_ing.contains("carrot") || lower_ing.contains("mushroom") || lower_ing.contains("spinach") || lower_ing.contains("broccoli") || lower_ing.contains("peas") || lower_ing.contains("bean") || lower_ing.contains("courgette") || lower_ing.contains("zucchini") || lower_ing.contains("aubergine") || lower_ing.contains("eggplant") || lower_ing.contains("corn") || lower_ing.contains("cabbage") || lower_ing.contains("lettuce") {
+        0.80
+    } else if lower_ing.contains("lentil") || lower_ing.contains("chickpea") {
+        0.80
+    } else if lower_ing.contains("coconut milk") || lower_ing.contains("coconut cream") {
+        1.50
+    } else if lower_ing.contains("stock") || lower_ing.contains("broth") {
+        0.80
+    } else if lower_ing.contains("salt") || lower_ing.contains("pepper") || lower_ing.contains("spice") || lower_ing.contains("cumin") || lower_ing.contains("paprika") || lower_ing.contains("cinnamon") || lower_ing.contains("oregano") || lower_ing.contains("basil") || lower_ing.contains("thyme") || lower_ing.contains("parsley") || lower_ing.contains("chili") || lower_ing.contains("ginger") || lower_ing.contains("turmeric") || lower_ing.contains("coriander") || lower_ing.contains("mint") {
+        0.15
+    } else if lower_ing.contains("nut") || lower_ing.contains("almond") || lower_ing.contains("walnut") || lower_ing.contains("peanut") || lower_ing.contains("cashew") {
+        1.50
+    } else if lower_ing.contains("chocolate") || lower_ing.contains("cocoa") {
+        1.50
+    } else if lower_ing.contains("sauce") || lower_ing.contains("soy") || lower_ing.contains("vinegar") || lower_ing.contains("worcestershire") || lower_ing.contains("ketchup") || lower_ing.contains("mustard") {
+        0.50
+    } else if lower_ing.contains("lemon") || lower_ing.contains("lime") || lower_ing.contains("orange") || lower_ing.contains("apple") || lower_ing.contains("banana") {
+        0.60
+    } else if lower_ing.contains("water") {
+        0.0
+    } else {
+        0.40
+    };
+
+    base_cost * qty * scale
+}
+
+fn parse_quantity(measure: &str) -> f64 {
+    let s = measure.trim();
+    if s.is_empty() { return 1.0; }
+
+    // Try fraction like "1/2", "1/4"
+    if let Some(pos) = s.find('/') {
+        let before = &s[..pos];
+        let after = &s[pos+1..];
+        // Handle "1 1/2" style
+        let parts: Vec<&str> = before.split_whitespace().collect();
+        if parts.len() == 2 {
+            let whole: f64 = parts[0].parse().unwrap_or(0.0);
+            let numer: f64 = parts[1].parse().unwrap_or(1.0);
+            let denom_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let denom: f64 = denom_str.parse().unwrap_or(1.0);
+            if denom > 0.0 { return whole + numer / denom; }
+        }
+        let numer: f64 = before.trim().parse().unwrap_or(1.0);
+        let denom_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let denom: f64 = denom_str.parse().unwrap_or(1.0);
+        if denom > 0.0 { return numer / denom; }
+    }
+
+    // Try leading number like "2 cups", "500g", "250ml"
+    let num_str: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    if !num_str.is_empty() {
+        let val: f64 = num_str.parse().unwrap_or(1.0);
+        // Normalize gram/ml amounts: 500g → ~1 unit, 100g → ~0.2
+        let rest = s[num_str.len()..].trim().to_lowercase();
+        if rest.starts_with('g') || rest.starts_with("ml") {
+            return (val / 500.0).max(0.1);
+        }
+        if rest.starts_with("kg") || rest.starts_with("l") {
+            return val * 2.0;
+        }
+        return val.max(0.1);
+    }
+
+    1.0
+}
+
+fn measure_scale(measure: &str) -> f64 {
+    if measure.contains("pinch") || measure.contains("dash") || measure.contains("to taste") || measure.contains("garnish") {
+        0.05
+    } else if measure.contains("tsp") || measure.contains("teaspoon") {
+        0.1
+    } else if measure.contains("tbsp") || measure.contains("tablespoon") || measure.contains("tbs") {
+        0.2
+    } else if measure.contains("cup") {
+        1.0
+    } else if measure.contains("lb") || measure.contains("pound") {
+        1.2
+    } else if measure.contains("oz") || measure.contains("ounce") {
+        0.4
+    } else if measure.contains("bunch") || measure.contains("handful") || measure.contains("sprig") {
+        0.3
+    } else if measure.contains("can") || measure.contains("tin") {
+        1.0
+    } else if measure.contains("slice") || measure.contains("clove") || measure.contains("piece") {
+        0.2
+    } else {
+        1.0
+    }
+}
+
+fn estimate_recipe_cost(meal: &Value) -> f64 {
+    let mut total = 0.0;
+    for i in 1..=20 {
+        let ing_key = format!("strIngredient{}", i);
+        let meas_key = format!("strMeasure{}", i);
+        let ing = meal[&ing_key].as_str().unwrap_or("").trim();
+        let meas = meal[&meas_key].as_str().unwrap_or("").trim();
+        if !ing.is_empty() {
+            total += estimate_ingredient_cost(ing, meas);
+        }
+    }
+    // Round to 2 decimal places
+    (total * 100.0).round() / 100.0
+}
+
+#[tauri::command]
+async fn suggest_budget_meals(budget: f64) -> Result<String, String> {
+    let categories = ["Chicken", "Beef", "Seafood", "Pasta", "Vegetarian", "Pork", "Breakfast", "Lamb"];
+
+    // Phase 1: Fetch category listings in parallel
+    let mut cat_handles = Vec::new();
+    for cat in &categories {
+        let url = format!("{}/filter.php?c={}", BASE_URL, cat);
+        cat_handles.push(tokio::spawn(async move {
+            let mut ids = Vec::new();
+            if let Ok(resp) = reqwest::get(&url).await {
+                if let Ok(body) = resp.json::<Value>().await {
+                    if let Some(meals) = body["meals"].as_array() {
+                        for meal in meals.iter().take(3) {
+                            if let Some(id) = meal["idMeal"].as_str() {
+                                ids.push(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            ids
+        }));
+    }
+
+    // Also fetch 4 random recipes in parallel
+    let mut rand_handles = Vec::new();
+    for _ in 0..4 {
+        let url = format!("{}/random.php", BASE_URL);
+        rand_handles.push(tokio::spawn(async move {
+            if let Ok(resp) = reqwest::get(&url).await {
+                if let Ok(body) = resp.json::<Value>().await {
+                    if let Some(meals) = body["meals"].as_array() {
+                        if let Some(meal) = meals.first() {
+                            return meal["idMeal"].as_str().map(String::from);
+                        }
+                    }
+                }
+            }
+            None
+        }));
+    }
+
+    // Collect all unique IDs
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut recipe_ids: Vec<String> = Vec::new();
+
+    for handle in cat_handles {
+        if let Ok(ids) = handle.await {
+            for id in ids {
+                if seen_ids.insert(id.clone()) {
+                    recipe_ids.push(id);
+                }
+            }
+        }
+    }
+
+    for handle in rand_handles {
+        if let Ok(Some(id)) = handle.await {
+            if seen_ids.insert(id.clone()) {
+                recipe_ids.push(id);
+            }
+        }
+    }
+
+    // Phase 2: Fetch full recipe details in parallel (batches of 10)
+    let mut budget_meals: Vec<Value> = Vec::new();
+
+    for chunk in recipe_ids.chunks(10) {
+        let mut detail_handles = Vec::new();
+        for id in chunk {
+            let url = format!("{}/lookup.php?i={}", BASE_URL, id);
+            let budget_val = budget;
+            detail_handles.push(tokio::spawn(async move {
+                if let Ok(resp) = reqwest::get(&url).await {
+                    if let Ok(body) = resp.json::<Value>().await {
+                        if let Some(meals) = body["meals"].as_array() {
+                            if let Some(meal) = meals.first() {
+                                let cost = estimate_recipe_cost(meal);
+                                if cost <= budget_val {
+                                    let mut m = meal.clone();
+                                    m["estimatedCost"] = serde_json::json!(format!("{:.2}", cost));
+                                    return Some(m);
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            }));
+        }
+
+        for handle in detail_handles {
+            if let Ok(Some(meal)) = handle.await {
+                budget_meals.push(meal);
+            }
+        }
+    }
+
+    // Sort by cost ascending
+    budget_meals.sort_by(|a, b| {
+        let ca: f64 = a["estimatedCost"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+        let cb: f64 = b["estimatedCost"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+        ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    serde_json::to_string(&budget_meals).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -322,6 +637,7 @@ pub fn run() {
             save_templates,
             load_templates,
             fetch_nutrition,
+            suggest_budget_meals,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

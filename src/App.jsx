@@ -4,6 +4,7 @@ import RecipeCard from "./components/RecipeCard";
 import MealPlan from "./components/MealPlan";
 import RecipeModal from "./components/RecipeModal";
 import ShoppingList from "./components/ShoppingList";
+import BudgetMeals from "./components/BudgetMeals";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
@@ -256,17 +257,18 @@ function App() {
           </div>
         </div>
         {/* Tab bar */}
-        <div className="px-4 sm:px-6 flex gap-6 border-t border-neutral-100 dark:border-neutral-800">
+        <div className="px-3 sm:px-6 flex gap-3 sm:gap-6 border-t border-neutral-100 dark:border-neutral-800 overflow-x-auto">
           {[
             { id: "search", label: "Search" },
             { id: "planner", label: "Plan" },
+            { id: "budget", label: "Budget" },
             { id: "shopping", label: "Shop" },
             { id: "favorites", label: "Favorites" },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+              className={`py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                 activeTab === tab.id
                   ? "border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100"
                   : "border-transparent text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300"
@@ -292,7 +294,7 @@ function App() {
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                 placeholder={searchMode === 'ingredient' ? "Search by ingredient..." : "Search recipes..."}
-                className="w-full px-4 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:bg-white dark:focus:bg-neutral-900 focus:ring-1 focus:ring-neutral-300 dark:focus:ring-neutral-600 transition-all dark:text-neutral-100"
+                className="w-full px-3 py-2.5 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:bg-white dark:focus:bg-neutral-900 focus:ring-1 focus:ring-neutral-300 dark:focus:ring-neutral-600 transition-all dark:text-neutral-100"
               />
 
               {/* Search suggestions dropdown */}
@@ -429,6 +431,18 @@ function App() {
             onSaveTemplate={saveTemplate}
             onApplyTemplate={applyTemplate}
             onDeleteTemplate={deleteTemplate}
+          />
+        )}
+
+        {/* Budget Tab */}
+        {activeTab === "budget" && (
+          <BudgetMeals
+            onOpen={openRecipeDetail}
+            onAddToPlan={addToMealPlan}
+            onToggleFav={toggleFavorite}
+            isFavorite={isFavorite}
+            days={DAYS}
+            mealTypes={MEAL_TYPES}
           />
         )}
 
